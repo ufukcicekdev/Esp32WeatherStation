@@ -332,6 +332,43 @@ void drawMusicScreen(const std::vector<String>& playlist, int currentIndex, bool
   spr.pushSprite(0, 0);
 }
 
+void drawYouTubeScreen(long subCount, String name, int batLevel) {
+  // Arka plan
+  spr.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, TFT_WHITE);
+
+  // Başlık (YouTube Kırmızısı)
+  spr.fillRect(0, 0, SCREEN_WIDTH, 50, 0xF800); 
+  spr.setTextDatum(MC_DATUM);
+  spr.setTextColor(TFT_WHITE, 0xF800);
+  spr.drawString("YOUTUBE", 160, 25, 4);
+
+  // Batarya İkonu (Beyaz zemin üzerinde görünmesi için rengi değiştiriyoruz veya header içinde çiziyoruz)
+  // Header içinde olduğu için drawBatteryIcon fonksiyonu uyumlu çalışacaktır.
+  drawBatteryIcon(batLevel);
+
+  // --- LOGO (Basit Çizim) ---
+  // Kırmızı Dikdörtgen
+  spr.fillRoundRect(130, 70, 60, 40, 10, 0xF800);
+  // Beyaz Üçgen (Play)
+  spr.fillTriangle(155, 80, 155, 100, 170, 90, TFT_WHITE);
+
+  // --- KANAL ADI ---
+  spr.setTextColor(TFT_BLACK, TFT_WHITE);
+  spr.setTextFont(4);
+  spr.drawString(name, 160, 130);
+
+  // --- ABONE SAYISI ---
+  spr.setTextColor(TFT_RED, TFT_WHITE);
+  spr.setTextFont(6); // Büyük Font
+  spr.drawString(String(subCount), 160, 170);
+  
+  spr.setTextFont(2);
+  spr.setTextColor(TFT_DARKGREY, TFT_WHITE);
+  spr.drawString("ABONE", 160, 205);
+
+  spr.pushSprite(0, 0);
+}
+
 void drawStartup(int progress) {
   spr.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, TFT_BLACK);
   

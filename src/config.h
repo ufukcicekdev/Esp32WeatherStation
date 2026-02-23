@@ -5,6 +5,11 @@
 #define WIFI_SSID       "your_ssid"
 #define WIFI_PASSWORD   "your_password"
 
+// --- YOUTUBE AYARLARI ---
+#define YOUTUBE_API_KEY "your_api_key" // Google Cloud Console'dan alınan API Key (AIza...)
+#define YOUTUBE_CHANNEL_ID "your_channel_id" // YouTube Kanal ID'si (UC...)
+#define INTERVAL_YOUTUBE 600000 // 10 Dakika
+
 // --- OPENWEATHERMAP AYARLARI ---
 #define API_KEY         "your_token"
 #define CITY            "Istanbul"

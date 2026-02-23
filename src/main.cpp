@@ -5,6 +5,7 @@
 #include <Adafruit_AHTX0.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <time.h>
 #include <SD.h>
@@ -28,12 +29,15 @@ float localTemp = 0.0;
 float localHum = 0.0;
 float istTemp = 0.0;
 String istDesc = "--";
+long youtubeSubs = 0;
+String youtubeName = "--";
 
 unsigned long lastWeatherUpdate = 0;
 unsigned long lastSensorUpdate = 0;
+unsigned long lastYoutubeUpdate = 0;
 
 // Ekran Yönetimi
-int currentPage = 0; // 0: Hava Durumu, 1: Saat, 2: Timer, 3: Müzik
+int currentPage = 0; // 0: Hava Durumu, 1: Saat, 2: Timer, 3: Müzik, 4: YouTube
 uint16_t touchStartX = 0;
 uint16_t touchStartY = 0;
 uint16_t touchLastX = 0;
@@ -64,6 +68,10 @@ void checkTouch();
 void handleTimerLogic();
 void loadSongs();
 int getBatteryLevel();
+void getYouTubeData();
+
+// UI.h içinde tanımlı olması gereken fonksiyon (Header'ı değiştiremediğimiz için burada extern ediyoruz)
+extern void drawYouTubeScreen(long subCount, String name, int batLevel);
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Brownout (Düşük voltaj) reset korumasını kapat
@@ -143,11 +151,13 @@ void setup() {
   
   // WiFi bağlanırken animasyon oynat (Bar dolup boşalsın veya ilerlesin)
   int wifiAnim = 60;
-  while (WiFi.status() != WL_CONNECTED) {
+  int wifiTimeout = 0; // Zaman aşımı sayacı
+  while (WiFi.status() != WL_CONNECTED && wifiTimeout < 300) { // Yaklaşık 15 saniye bekle
     delay(50);
     wifiAnim++;
     if (wifiAnim > 90) wifiAnim = 60; // 60-90 arası gidip gel
     drawStartup(wifiAnim);
+    wifiTimeout++;
   }
   drawStartup(95); // %95 (Bağlandı)
   
@@ -157,6 +167,7 @@ void setup() {
   // İlk verileri al
   updateLocalSensor();
   getWeatherData();
+  getYouTubeData();
   
   drawStartup(100); // %100
   delay(500); // Kullanıcı tam doluluğu görsün
@@ -226,6 +237,13 @@ void loop() {
     }
   }
 
+  // YouTube Güncelleme
+  if (currentPage != 3 && currentMillis - lastYoutubeUpdate >= INTERVAL_YOUTUBE) {
+    lastYoutubeUpdate = currentMillis;
+    getYouTubeData();
+    if (currentPage == 4) drawYouTubeScreen(youtubeSubs, youtubeName, getBatteryLevel());
+  }
+
   // Timer Mantığı
   if (currentPage == 2) {
     handleTimerLogic();
@@ -289,11 +307,11 @@ void checkTouch() {
         if (deltaX > 0) {
           // İleri (Next)
           currentPage++;
-          if (currentPage > 3) currentPage = 0;
+          if (currentPage > 4) currentPage = 0;
         } else {
           // Geri (Prev)
           currentPage--;
-          if (currentPage < 0) currentPage = 3;
+          if (currentPage < 0) currentPage = 4;
         }
 
         // Sayfa değiştiğinde Alarmı ve LEDC'yi kesinlikle kapat (Pin çakışmasını önle)
@@ -323,13 +341,14 @@ void checkTouch() {
         else if (currentPage == 1) drawClockScreen(getBatteryLevel());
         else if (currentPage == 2) drawTimerScreen(timerHour, timerMin, timerSec, timerActive, alarmActive, getBatteryLevel());
         else if (currentPage == 3) drawMusicScreen(playlist, currentSongIndex, isPlaying, musicVolume, getBatteryLevel());
+        else if (currentPage == 4) drawYouTubeScreen(youtubeSubs, youtubeName, getBatteryLevel());
       }
       // Eğer hareket azsa bu bir Tıklamadır (Tap)
       else {
-        // Hava Durumu (0) veya Saat (1) ekranındaysak dokunarak geçiş yap
-        if (currentPage == 0 || currentPage == 1) {
+        // Hava Durumu (0), Saat (1) veya YouTube (4) ekranındaysak dokunarak geçiş yap
+        if (currentPage == 0 || currentPage == 1 || currentPage == 4) {
              currentPage++;
-             if (currentPage > 3) currentPage = 0;
+             if (currentPage > 4) currentPage = 0;
              
              // Sayfayı Çiz
              tft.fillScreen(TFT_BLACK);
@@ -337,6 +356,7 @@ void checkTouch() {
              else if (currentPage == 1) drawClockScreen(getBatteryLevel());
              else if (currentPage == 2) drawTimerScreen(timerHour, timerMin, timerSec, timerActive, alarmActive, getBatteryLevel());
              else if (currentPage == 3) drawMusicScreen(playlist, currentSongIndex, isPlaying, musicVolume, getBatteryLevel());
+             else if (currentPage == 4) drawYouTubeScreen(youtubeSubs, youtubeName, getBatteryLevel());
         }
         // Timer Ekranı (2) Kontrolleri
         else if (currentPage == 2) {
@@ -549,6 +569,44 @@ void getWeatherData() {
       istDesc.replace("Ü", "U");
     }
     http.end();
+  }
+}
+
+void getYouTubeData() {
+  if (WiFi.status() == WL_CONNECTED) {
+    // --- BELLEK YÖNETİMİ ---
+    // HTTPS bağlantısı için yer açmak adına Sprite'ı geçici olarak siliyoruz (~76KB yer açılır)
+    spr.deleteSprite();
+
+    // --- BLOK BAŞLANGICI ---
+    // Bu blok sayesinde client ve http nesneleri işleri bitince hemen hafızadan silinir.
+    {
+      WiFiClientSecure client;
+      client.setInsecure(); 
+      
+      HTTPClient http;
+      String url = "https://www.googleapis.com/youtube/v3/channels?part=statistics,snippet&id=" + String(YOUTUBE_CHANNEL_ID) + "&key=" + String(YOUTUBE_API_KEY);
+      
+      if (http.begin(client, url)) {
+        int httpCode = http.GET();
+        if (httpCode > 0) {
+          String payload = http.getString();
+          DynamicJsonDocument doc(4096); 
+          DeserializationError error = deserializeJson(doc, payload);
+          if (!error) {
+             if (doc.containsKey("items") && doc["items"].size() > 0) {
+               youtubeSubs = doc["items"][0]["statistics"]["subscriberCount"].as<long>();
+               youtubeName = doc["items"][0]["snippet"]["title"].as<String>();
+             }
+          }
+        }
+        http.end();
+      }
+    } // --- BLOK BİTİŞİ: client ve http burada yok edilir, RAM serbest kalır ---
+
+    // --- BELLEK YÖNETİMİ ---
+    // İşlem bitti, Sprite'ı tekrar oluşturuyoruz
+    spr.createSprite(SCREEN_WIDTH, SCREEN_HEIGHT);
   }
 }
 
